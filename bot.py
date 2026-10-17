@@ -2,23 +2,21 @@ import asyncio
 import logging
 import os
 import re
-from contextlib import suppress
+from contextlib import suppress, asynccontextmanager
 from typing import Optional
 
+import aiosqlite
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode, ChatType, ChatMemberStatus
 from aiogram.filters import Command, CommandObject, ChatMemberUpdatedFilter, IS_MEMBER, IS_NOT_MEMBER
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import (
     Message, CallbackQuery, InlineQuery, InlineQueryResultArticle,
     InputTextMessageContent, InlineKeyboardMarkup, InlineKeyboardButton,
-    ChosenInlineResult, ChatMemberUpdated, FSInputFile
+    ChatMemberUpdated
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from aiosqlite import connect, Connection
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -37,13 +35,17 @@ dp.include_router(router)
 
 # ==================== DATABASE ====================
 
-async def get_db() -> Connection:
-    db = await connect(DB_PATH)
-    db.row_factory = lambda c, r: dict(zip([col[0] for col in c.description], r))
-    return db
+@asynccontextmanager
+async def get_db():
+    db = await aiosqlite.connect(DB_PATH)
+    db.row_factory = aiosqlite.Row
+    try:
+        yield db
+    finally:
+        await db.close()
 
 async def init_db():
-    async with await get_db() as db:
+    async with get_db() as db:
         await db.executescript("""
             CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER PRIMARY KEY,
@@ -143,7 +145,7 @@ async def init_db():
         await db.commit()
 
 async def ensure_user(user_id: int, username: str = None, first_name: str = None):
-    async with await get_db() as db:
+    async with get_db() as db:
         await db.execute(
             """INSERT INTO users (user_id, username, first_name) VALUES (?, ?, ?)
                ON CONFLICT(user_id) DO UPDATE SET
@@ -154,18 +156,18 @@ async def ensure_user(user_id: int, username: str = None, first_name: str = None
         await db.commit()
 
 async def is_admin(user_id: int) -> bool:
-    async with await get_db() as db:
+    async with get_db() as db:
         cur = await db.execute("SELECT is_admin FROM users WHERE user_id = ?", (user_id,))
         row = await cur.fetchone()
         return bool(row and row["is_admin"])
 
 async def get_group(chat_id: int) -> Optional[dict]:
-    async with await get_db() as db:
+    async with get_db() as db:
         cur = await db.execute("SELECT * FROM groups WHERE chat_id = ?", (chat_id,))
         return await cur.fetchone()
 
 async def ensure_group(chat_id: int, title: str = None):
-    async with await get_db() as db:
+    async with get_db() as db:
         await db.execute(
             """INSERT INTO groups (chat_id, title) VALUES (?, ?)
                ON CONFLICT(chat_id) DO UPDATE SET title = COALESCE(excluded.title, groups.title)""",
@@ -181,16 +183,11 @@ def mention(user) -> str:
 
 def format_rp(emoji: str, user_name: str, action: str, target_name: str) -> str:
     # Поддержка custom_emoji_id (число) или обычного эмодзи
-    if emoji.isdigit():
+    if str(emoji).isdigit():
         em = f'<tg-emoji emoji-id="{emoji}">✨</tg-emoji>'
     else:
         em = emoji
     return f"{em} {user_name} {action} {target_name}"
-
-# ==================== FSM ====================
-
-class AdminStates(StatesGroup):
-    waiting_toggle_basic = State()
 
 # ==================== COMMANDS ====================
 
@@ -240,7 +237,7 @@ async def cmd_nrp(message: Message, command: CommandObject):
         await message.answer("Триггер и действие не могут быть пустыми")
         return
 
-    async with await get_db() as db:
+    async with get_db() as db:
         try:
             await db.execute(
                 "INSERT INTO custom_rp (user_id, emoji, trigger, action) VALUES (?, ?, ?, ?)",
@@ -253,7 +250,7 @@ async def cmd_nrp(message: Message, command: CommandObject):
 
 @router.message(Command("mrp"))
 async def cmd_mrp(message: Message):
-    async with await get_db() as db:
+    async with get_db() as db:
         cur = await db.execute(
             "SELECT id, emoji, trigger, action FROM custom_rp WHERE user_id = ?",
             (message.from_user.id,)
@@ -266,7 +263,7 @@ async def cmd_mrp(message: Message):
 
     text = "<b>Твои кастомные РП:</b>\n\n"
     for r in rows:
-        em = r["emoji"] if not r["emoji"].isdigit() else f"ID:{r['emoji']}"
+        em = r["emoji"] if not str(r["emoji"]).isdigit() else f"ID:{r['emoji']}"
         text += f"#{r['id']} {em} <code>{r['trigger']}</code> → {r['action']}\n"
     await message.answer(text)
 
@@ -276,7 +273,7 @@ async def cmd_drp(message: Message, command: CommandObject):
         await message.answer("Использование: <code>/drp ID</code>\nСписок своих РП: /mrp")
         return
     rid = int(command.args.strip())
-    async with await get_db() as db:
+    async with get_db() as db:
         cur = await db.execute(
             "DELETE FROM custom_rp WHERE id = ? AND user_id = ?",
             (rid, message.from_user.id)
@@ -298,7 +295,7 @@ async def cmd_arp(message: Message):
         return
 
     await ensure_group(message.chat.id, message.chat.title)
-    async with await get_db() as db:
+    async with get_db() as db:
         cur = await db.execute("SELECT arp_enabled FROM groups WHERE chat_id = ?", (message.chat.id,))
         row = await cur.fetchone()
         new_val = 0 if row["arp_enabled"] else 1
@@ -319,7 +316,7 @@ async def cmd_crp(message: Message):
         return
 
     await ensure_group(message.chat.id, message.chat.title)
-    async with await get_db() as db:
+    async with get_db() as db:
         cur = await db.execute("SELECT crp_enabled FROM groups WHERE chat_id = ?", (message.chat.id,))
         row = await cur.fetchone()
         new_val = 0 if row["crp_enabled"] else 1
@@ -349,7 +346,7 @@ async def adm_basic(cb: CallbackQuery):
     if not await is_admin(cb.from_user.id):
         return await cb.answer("Нет доступа", show_alert=True)
 
-    async with await get_db() as db:
+    async with get_db() as db:
         cur = await db.execute(
             "SELECT id, emoji, trigger, is_18plus, is_active FROM rp_commands WHERE is_basic = 1 ORDER BY is_18plus, trigger"
         )
@@ -375,7 +372,7 @@ async def adm_toggle(cb: CallbackQuery):
     if not await is_admin(cb.from_user.id):
         return await cb.answer("Нет доступа", show_alert=True)
     rid = int(cb.data.split(":")[2])
-    async with await get_db() as db:
+    async with get_db() as db:
         cur = await db.execute("SELECT is_active FROM rp_commands WHERE id = ?", (rid,))
         row = await cur.fetchone()
         if not row:
@@ -391,7 +388,7 @@ async def adm_customs(cb: CallbackQuery):
     if not await is_admin(cb.from_user.id):
         return await cb.answer("Нет доступа", show_alert=True)
 
-    async with await get_db() as db:
+    async with get_db() as db:
         cur = await db.execute("""
             SELECT c.id, c.emoji, c.trigger, c.action, c.user_id, u.username, u.first_name
             FROM custom_rp c
@@ -405,7 +402,7 @@ async def adm_customs(cb: CallbackQuery):
     else:
         text = "<b>Последние кастомные РП:</b>\n\n"
         for r in rows:
-            uname = f"@{r['username']}" if r["username"] else r["first_name"] or r["user_id"]
+            uname = f"@{r['username']}" if r["username"] else (r["first_name"] or str(r["user_id"]))
             em = r["emoji"] if not str(r["emoji"]).isdigit() else f"ID:{r['emoji']}"
             text += f"#{r['id']} {em} <code>{r['trigger']}</code> → {r['action']} (от {uname})\n"
 
@@ -419,7 +416,7 @@ async def adm_chats(cb: CallbackQuery):
     if not await is_admin(cb.from_user.id):
         return await cb.answer("Нет доступа", show_alert=True)
 
-    async with await get_db() as db:
+    async with get_db() as db:
         cur = await db.execute("SELECT chat_id, title, arp_enabled, crp_enabled FROM groups ORDER BY title")
         rows = await cur.fetchall()
 
@@ -469,7 +466,7 @@ async def rp_handler(message: Message):
     crp_ok = group["crp_enabled"] if group else True
 
     # Ищем базовую РП
-    async with await get_db() as db:
+    async with get_db() as db:
         cur = await db.execute(
             "SELECT emoji, action, is_18plus FROM rp_commands WHERE trigger = ? AND is_active = 1 AND is_basic = 1",
             (text,)
@@ -504,7 +501,7 @@ async def inline_handler(query: InlineQuery):
     q = (query.query or "").strip().lower()
 
     results = []
-    async with await get_db() as db:
+    async with get_db() as db:
         # Базовые
         cur = await db.execute(
             "SELECT id, emoji, trigger, action, is_18plus FROM rp_commands WHERE is_active = 1 AND is_basic = 1"
@@ -571,12 +568,12 @@ async def inline_callback(cb: CallbackQuery):
         return await cb.answer()
     action, rid, owner_id = parts[1], parts[2], int(parts[3])
 
-    # Только целевой пользователь может нажать
+    # Только целевой пользователь может нажать (не сам автор)
     if cb.from_user.id == owner_id:
         return await cb.answer("Это предложение для другого человека", show_alert=True)
 
     # Получаем данные РП
-    async with await get_db() as db:
+    async with get_db() as db:
         if rid.startswith("b"):
             cur = await db.execute(
                 "SELECT emoji, trigger, action FROM rp_commands WHERE id = ?",
@@ -619,7 +616,7 @@ async def bot_added(event: ChatMemberUpdated):
 
 @router.my_chat_member(ChatMemberUpdatedFilter(IS_MEMBER >> IS_NOT_MEMBER))
 async def bot_removed(event: ChatMemberUpdated):
-    async with await get_db() as db:
+    async with get_db() as db:
         await db.execute("DELETE FROM groups WHERE chat_id = ?", (event.chat.id,))
         await db.commit()
     logger.info(f"Bot removed from {event.chat.id}")
