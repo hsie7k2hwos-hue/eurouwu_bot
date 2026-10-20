@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os
 import re
-from contextlib import suppress, asynccontextmanager
+from contextlib import asynccontextmanager
 from html import escape
 from typing import Optional
 
@@ -10,6 +10,7 @@ import aiosqlite
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode, ChatType, ChatMemberStatus
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandObject, ChatMemberUpdatedFilter, IS_MEMBER, IS_NOT_MEMBER
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -27,7 +28,7 @@ load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 DB_PATH = os.getenv("DB_PATH", "evrik.db")
-NO_EMOJI = os.getenv("NO_EMOJI", "❌")  # можно указать custom_emoji_id
+NO_EMOJI = os.getenv("NO_EMOJI", "❌")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -37,7 +38,7 @@ dp = Dispatcher(storage=MemoryStorage())
 router = Router()
 dp.include_router(router)
 
-# Кэш для принудительного обновления кастомных эмодзи после выбора инлайн-результата
+# Кэш для принудительного обновления кастомных эмодзи
 inline_cache: dict[str, str] = {}
 
 
@@ -183,16 +184,8 @@ async def ensure_group(chat_id: int, title: str = None):
 
 # ==================== HELPERS ====================
 def mention(user) -> str:
-    """
-    Надёжное HTML-упоминание.
-    Приоритет:
-    1. Имя (full_name / first_name + last_name) → экранируем
-    2. Если имени нет (пустое) → username
-    3. Если username нет → ID (крайний случай)
-    """
     uid = getattr(user, "id", user)
 
-    # 1. Пытаемся взять имя
     name = None
     if hasattr(user, "full_name") and user.full_name:
         name = user.full_name.strip()
@@ -204,17 +197,14 @@ def mention(user) -> str:
     if name:
         return f'<a href="tg://user?id={uid}">{escape(name)}</a>'
 
-    # 2. Нет имени → берём username
     username = getattr(user, "username", None)
     if username:
         return f'<a href="tg://user?id={uid}">@{escape(username)}</a>'
 
-    # 3. Крайний случай — ID
     return f'<a href="tg://user?id={uid}">{uid}</a>'
 
 
 def render_emoji(emoji: str) -> str:
-    """Обычный эмодзи или <tg-emoji> для премиум"""
     if str(emoji).isdigit():
         return f'<tg-emoji emoji-id="{emoji}">✨</tg-emoji>'
     return emoji
@@ -225,7 +215,6 @@ def format_rp(emoji: str, user_name: str, action: str, target_name: str) -> str:
 
 
 def extract_custom_emoji_id(message: Message) -> Optional[str]:
-    """Достаёт custom_emoji_id из сообщения, если есть"""
     if not message.entities:
         return None
     for ent in message.entities:
@@ -234,7 +223,7 @@ def extract_custom_emoji_id(message: Message) -> Optional[str]:
     return None
 
 
-# ==================== FSM для админки ====================
+# ==================== FSM ====================
 class AdminFSM(StatesGroup):
     add_emoji = State()
     add_trigger = State()
@@ -296,10 +285,7 @@ async def cmd_nrp(message: Message, command: CommandObject):
         await message.answer("Триггер и действие не могут быть пустыми")
         return
 
-    if custom_id:
-        emoji = custom_id
-    else:
-        emoji = emoji_raw.strip()
+    emoji = custom_id if custom_id else emoji_raw.strip()
 
     async with get_db() as db:
         try:
@@ -826,15 +812,34 @@ async def inline_handler(query: InlineQuery):
     results = []
 
     async with get_db() as db:
-        cur = await db.execute(
-            "SELECT id, emoji, trigger, action, is_18plus FROM rp_commands WHERE is_active = 1 AND is_basic = 1"
-        )
+        # Базовые команды
+        if q:
+            cur = await db.execute(
+                "SELECT id, emoji, trigger, action, is_18plus FROM rp_commands "
+                "WHERE is_active = 1 AND is_basic = 1 AND trigger LIKE ? "
+                "ORDER BY trigger LIMIT 30",
+                (f"%{q}%",)
+            )
+        else:
+            cur = await db.execute(
+                "SELECT id, emoji, trigger, action, is_18plus FROM rp_commands "
+                "WHERE is_active = 1 AND is_basic = 1 ORDER BY trigger LIMIT 30"
+            )
         basics = await cur.fetchall()
 
-        cur = await db.execute(
-            "SELECT id, emoji, trigger, action FROM custom_rp WHERE user_id = ?",
-            (query.from_user.id,)
-        )
+        # Кастомные
+        if q:
+            cur = await db.execute(
+                "SELECT id, emoji, trigger, action FROM custom_rp "
+                "WHERE user_id = ? AND trigger LIKE ? LIMIT 20",
+                (query.from_user.id, f"%{q}%")
+            )
+        else:
+            cur = await db.execute(
+                "SELECT id, emoji, trigger, action FROM custom_rp "
+                "WHERE user_id = ? LIMIT 20",
+                (query.from_user.id,)
+            )
         customs = await cur.fetchall()
 
     all_rps = []
@@ -855,11 +860,7 @@ async def inline_handler(query: InlineQuery):
             "adult": False
         })
 
-    if q:
-        all_rps = [r for r in all_rps if q in r["trigger"]]
-
     for r in all_rps[:40]:
-        # В title кастомные эмодзи не поддерживаются Telegram — только обычный текст
         em_show = r["emoji"] if not str(r["emoji"]).isdigit() else "✨"
         title = f"{em_show} {r['trigger']}"
         if r["adult"]:
@@ -867,7 +868,6 @@ async def inline_handler(query: InlineQuery):
 
         msg_text = f"{render_emoji(r['emoji'])} {mention(query.from_user)} хочет {r['trigger']}"
 
-        # Сохраняем текст в кэш, чтобы сразу после выбора принудительно обновить сообщение
         cache_key = f"{query.from_user.id}:{r['id']}"
         inline_cache[cache_key] = msg_text
 
@@ -895,15 +895,18 @@ async def inline_handler(query: InlineQuery):
             )
         )
 
-    await query.answer(results, cache_time=5, is_personal=True)
+    try:
+        await query.answer(results, cache_time=5, is_personal=True)
+    except TelegramBadRequest as e:
+        # Query уже протух — это нормально, просто игнорируем
+        if "query is too old" in str(e).lower() or "query id is invalid" in str(e).lower():
+            logger.debug(f"Inline query expired: {e}")
+        else:
+            raise
 
 
 @router.chosen_inline_result()
 async def chosen_inline_handler(result: ChosenInlineResult):
-    """
-    Сразу после выбора результата принудительно редактируем сообщение.
-    Это заставляет клиент перерисовать кастомный эмодзи (как сообщение от бота).
-    """
     if not result.inline_message_id:
         return
 
@@ -919,7 +922,6 @@ async def chosen_inline_handler(result: ChosenInlineResult):
             parse_mode=ParseMode.HTML
         )
     except Exception as e:
-        # Если текст не изменился — Telegram может вернуть ошибку, это нормально
         logger.debug(f"Chosen inline edit: {e}")
 
 
