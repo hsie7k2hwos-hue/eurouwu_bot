@@ -36,8 +36,8 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.client.default import DefaultBotProperties
 
 # ====================== КОНФИГ ======================
-BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"
-ADMIN_IDS = [123456789]          # твои Telegram ID
+BOT_TOKEN = "8994844279:AAEZ30IMcQNMuaniGPVCWz2l9-6fAenvBz0"
+ADMIN_IDS = [8729666458]          # твои Telegram ID
 DB_PATH = "evrik.db"
 
 # Популярные premium-emoji (custom_emoji_id, fallback)
