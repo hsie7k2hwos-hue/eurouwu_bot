@@ -5,6 +5,7 @@ import re
 from contextlib import suppress, asynccontextmanager
 from html import escape
 from typing import Optional
+
 import aiosqlite
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.client.default import DefaultBotProperties
@@ -16,7 +17,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import (
     Message, CallbackQuery, InlineQuery, InlineQueryResultArticle,
     InputTextMessageContent, InlineKeyboardMarkup, InlineKeyboardButton,
-    ChatMemberUpdated
+    ChatMemberUpdated, ChosenInlineResult
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from dotenv import load_dotenv
@@ -848,6 +849,44 @@ async def inline_handler(query: InlineQuery):
             )
         )
     await query.answer(results, cache_time=5, is_personal=True)
+
+
+@router.chosen_inline_result()
+async def chosen_inline(result: ChosenInlineResult):
+    """Сразу после выбора inline-результата правим сообщение на версию с настоящим премиум-эмодзи."""
+    if not result.inline_message_id:
+        return
+
+    rid = result.result_id
+    async with get_db() as db:
+        if rid.startswith("b"):
+            cur = await db.execute(
+                "SELECT emoji, trigger, action FROM rp_commands WHERE id = ?",
+                (int(rid[1:]),)
+            )
+        else:
+            cur = await db.execute(
+                "SELECT emoji, trigger, action FROM custom_rp WHERE id = ?",
+                (int(rid[1:]),)
+            )
+        rp = await cur.fetchone()
+
+    if not rp:
+        return
+
+    owner_mention = mention(result.from_user)
+    text = f"{render_emoji(rp['emoji'])} {owner_mention} хочет {safe_text(rp['trigger'])}"
+
+    try:
+        await bot.edit_message_text(
+            text=text,
+            inline_message_id=result.inline_message_id,
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True
+            # reply_markup не передаём — кнопки остаются
+        )
+    except Exception as e:
+        logger.error(f"Chosen inline edit error: {e}")
 
 
 @router.callback_query(F.data.startswith("inl:"))
