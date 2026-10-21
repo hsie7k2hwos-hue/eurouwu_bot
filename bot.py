@@ -28,24 +28,24 @@ DB_PATH = os.getenv("DB_PATH", "evrik.db")
 
 # ==================== PREMIUM EMOJI (из emoji.wivvi.net) ====================
 PE = {
-    "back": "5960671702059848143",          # ⬅️ Назад
-    "list": "5766994197705921104",          # 🗂 Список
-    "add": "6032924188828767321",           # ➕ Ещё
-    "edit": "6039779802741739617",          # ✏️ Редактировать
-    "delete": "6039522349517115015",        # 🗑 Мусорный бак
-    "check": "5774022692642492953",         # ✅ Галочка
-    "cross": "5774077015388852135",         # ❌ Крестик
-    "settings": "6032742198179532882",      # ⚙ Настройки
-    "bot": "6030400221232501136",           # 🤖 Бот
-    "chats": "6037421444789440735",         # 💬 Чаты
-    "custom": "6039565797406282001",        # 🏷 Стикер
-    "info": "6028435952299413210",          # ℹ Инфо
-    "question": "6030848053177486888",      # ❓ Вопрос
-    "18plus": "5922610170034132416",        # 🔞 18+
-    "toggle": "6030657343744644592",        # 🔁 Повтор
-    "star": "6034923938486684992",          # ⭐️ Звезда
-    "gift": "6032644646587338669",          # 🎁 Подарок
-    "people": "6032609071373226027",        # 👥 Люди
+    "back": "5960671702059848143",  # ⬅️ Назад
+    "list": "5766994197705921104",  # 🗂 Список
+    "add": "6032924188828767321",  # ➕ Ещё
+    "edit": "6039779802741739617",  # ✏️ Редактировать
+    "delete": "6039522349517115015",  # 🗑 Мусорный бак
+    "check": "5774022692642492953",  # ✅ Галочка
+    "cross": "5774077015388852135",  # ❌ Крестик
+    "settings": "6032742198179532882",  # ⚙ Настройки
+    "bot": "6030400221232501136",  # 🤖 Бот
+    "chats": "6037421444789440735",  # 💬 Чаты
+    "custom": "6039565797406282001",  # 🏷 Стикер
+    "info": "6028435952299413210",  # ℹ Инфо
+    "question": "6030848053177486888",  # ❓ Вопрос
+    "18plus": "5922610170034132416",  # 🔞 18+
+    "toggle": "6030657343744644592",  # 🔁 Повтор
+    "star": "6034923938486684992",  # ⭐️ Звезда
+    "gift": "6032644646587338669",  # 🎁 Подарок
+    "people": "6032609071373226027",  # 👥 Люди
 }
 
 NO_EMOJI = PE["cross"]  # премиум-крестик для отказа
@@ -58,6 +58,7 @@ dp = Dispatcher(storage=MemoryStorage())
 router = Router()
 dp.include_router(router)
 
+
 # ==================== DATABASE ====================
 @asynccontextmanager
 async def get_db():
@@ -67,6 +68,7 @@ async def get_db():
         yield db
     finally:
         await db.close()
+
 
 async def init_db():
     async with get_db() as db:
@@ -160,6 +162,7 @@ async def init_db():
             )
         await db.commit()
 
+
 async def ensure_user(user_id: int, username: str = None, first_name: str = None):
     async with get_db() as db:
         await db.execute(
@@ -171,16 +174,19 @@ async def ensure_user(user_id: int, username: str = None, first_name: str = None
         )
         await db.commit()
 
+
 async def is_admin(user_id: int) -> bool:
     async with get_db() as db:
         cur = await db.execute("SELECT is_admin FROM users WHERE user_id = ?", (user_id,))
         row = await cur.fetchone()
         return bool(row and row["is_admin"])
 
+
 async def get_group(chat_id: int) -> Optional[dict]:
     async with get_db() as db:
         cur = await db.execute("SELECT * FROM groups WHERE chat_id = ?", (chat_id,))
         return await cur.fetchone()
+
 
 async def ensure_group(chat_id: int, title: str = None):
     async with get_db() as db:
@@ -191,17 +197,20 @@ async def ensure_group(chat_id: int, title: str = None):
         )
         await db.commit()
 
+
 # ==================== HELPERS ====================
 def mention(user) -> str:
     name = getattr(user, "first_name", None) or "Аноним"
     uid = getattr(user, "id", user)
     return f'<a href="tg://user?id={uid}">{name}</a>'
 
+
 def render_emoji(emoji: str) -> str:
     """Обычный эмодзи или <tg-emoji> для премиум"""
     if str(emoji).isdigit():
         return f'<tg-emoji emoji-id="{emoji}">✨</tg-emoji>'
     return emoji
+
 
 def pe(name: str, fallback: str = "✨") -> str:
     """Быстрый рендер премиум-эмодзи из словаря PE"""
@@ -210,8 +219,10 @@ def pe(name: str, fallback: str = "✨") -> str:
         return f'<tg-emoji emoji-id="{eid}">{fallback}</tg-emoji>'
     return fallback
 
+
 def format_rp(emoji: str, user_name: str, action: str, target_name: str) -> str:
     return f"{render_emoji(emoji)} {user_name} {action} {target_name}"
+
 
 def extract_custom_emoji_id(message: Message) -> Optional[str]:
     if not message.entities:
@@ -220,6 +231,7 @@ def extract_custom_emoji_id(message: Message) -> Optional[str]:
         if ent.type == "custom_emoji" and ent.custom_emoji_id:
             return str(ent.custom_emoji_id)
     return None
+
 
 # ==================== FSM ====================
 class AdminFSM(StatesGroup):
@@ -230,6 +242,7 @@ class AdminFSM(StatesGroup):
     edit_id = State()
     edit_field = State()
     edit_value = State()
+
 
 # ==================== COMMANDS ====================
 @router.message(Command("start"))
@@ -244,6 +257,7 @@ async def cmd_start(message: Message):
     )
     await message.answer(text)
 
+
 @router.message(Command("help"))
 async def cmd_help(message: Message):
     text = (
@@ -256,6 +270,7 @@ async def cmd_help(message: Message):
         f"{pe('settings', '⚙')} /admin — админ-панель"
     )
     await message.answer(text)
+
 
 @router.message(Command("nrp"))
 async def cmd_nrp(message: Message, command: CommandObject):
@@ -291,6 +306,7 @@ async def cmd_nrp(message: Message, command: CommandObject):
         except Exception:
             await message.answer(f"{pe('cross', '❌')} У тебя уже есть РП с таким триггером. Удали старую через /drp")
 
+
 @router.message(Command("mrp"))
 async def cmd_mrp(message: Message):
     async with get_db() as db:
@@ -308,6 +324,7 @@ async def cmd_mrp(message: Message):
         text += f"#{r['id']} {em} <code>{r['trigger']}</code> → {r['action']}\n"
     await message.answer(text)
 
+
 @router.message(Command("drp"))
 async def cmd_drp(message: Message, command: CommandObject):
     if not command.args or not command.args.strip().isdigit():
@@ -324,6 +341,7 @@ async def cmd_drp(message: Message, command: CommandObject):
             await message.answer(f"{pe('check', '✅')} Удалено")
         else:
             await message.answer(f"{pe('cross', '❌')} РП не найдена или не твоя")
+
 
 @router.message(Command("arp"))
 async def cmd_arp(message: Message):
@@ -345,6 +363,7 @@ async def cmd_arp(message: Message):
     icon = pe("check", "✅") if new_val else pe("cross", "❌")
     await message.answer(f"{pe('18plus', '🔞')} 18+ РП-команды теперь {icon} <b>{status}</b> в этом чате.")
 
+
 @router.message(Command("crp"))
 async def cmd_crp(message: Message):
     if message.chat.type not in (ChatType.GROUP, ChatType.SUPERGROUP):
@@ -365,6 +384,7 @@ async def cmd_crp(message: Message):
     icon = pe("check", "✅") if new_val else pe("cross", "❌")
     await message.answer(f"{pe('custom', '🏷')} Кастомные РП теперь {icon} <b>{status}</b> в этом чате.")
 
+
 # ==================== ADMIN PANEL ====================
 @router.message(Command("admin"))
 async def cmd_admin(message: Message):
@@ -379,6 +399,7 @@ async def cmd_admin(message: Message):
     kb.adjust(1)
     await message.answer(f"{pe('settings', '⚙')} <b>Админ-панель Еврика</b>", reply_markup=kb.as_markup())
 
+
 @router.callback_query(F.data == "adm:back")
 async def adm_back(cb: CallbackQuery, state: FSMContext):
     if not await is_admin(cb.from_user.id):
@@ -392,6 +413,7 @@ async def adm_back(cb: CallbackQuery, state: FSMContext):
     kb.adjust(1)
     await cb.message.edit_text(f"{pe('settings', '⚙')} <b>Админ-панель Еврика</b>", reply_markup=kb.as_markup())
     await cb.answer()
+
 
 @router.callback_query(F.data == "adm:basic")
 async def adm_basic(cb: CallbackQuery):
@@ -415,6 +437,7 @@ async def adm_basic(cb: CallbackQuery):
     kb.adjust(1)
     await cb.message.edit_text(text, reply_markup=kb.as_markup())
     await cb.answer()
+
 
 @router.callback_query(F.data.startswith("adm:rp:"))
 async def adm_rp_manage(cb: CallbackQuery):
@@ -446,6 +469,7 @@ async def adm_rp_manage(cb: CallbackQuery):
     await cb.message.edit_text(text, reply_markup=kb.as_markup())
     await cb.answer()
 
+
 @router.callback_query(F.data.startswith("adm:toggle:"))
 async def adm_toggle(cb: CallbackQuery):
     if not await is_admin(cb.from_user.id):
@@ -463,6 +487,7 @@ async def adm_toggle(cb: CallbackQuery):
     cb.data = f"adm:rp:{rid}"
     await adm_rp_manage(cb)
 
+
 @router.callback_query(F.data.startswith("adm:del:"))
 async def adm_del(cb: CallbackQuery):
     if not await is_admin(cb.from_user.id):
@@ -474,6 +499,7 @@ async def adm_del(cb: CallbackQuery):
     await cb.answer("Удалено")
     await adm_basic(cb)
 
+
 @router.callback_query(F.data.startswith("adm:edit:"))
 async def adm_edit_start(cb: CallbackQuery, state: FSMContext):
     if not await is_admin(cb.from_user.id):
@@ -483,6 +509,7 @@ async def adm_edit_start(cb: CallbackQuery, state: FSMContext):
     await state.update_data(edit_id=int(rid), edit_field=field)
     await cb.message.answer(f"{pe('edit', '✏️')} Отправь новое значение для <b>{field}</b>:\n(или /cancel)")
     await cb.answer()
+
 
 @router.message(AdminFSM.edit_value)
 async def adm_edit_value(message: Message, state: FSMContext):
@@ -512,6 +539,7 @@ async def adm_edit_value(message: Message, state: FSMContext):
     await state.clear()
     await message.answer(f"{pe('check', '✅')} Обновлено")
 
+
 @router.callback_query(F.data == "adm:add")
 async def adm_add_start(cb: CallbackQuery, state: FSMContext):
     if not await is_admin(cb.from_user.id):
@@ -519,6 +547,7 @@ async def adm_add_start(cb: CallbackQuery, state: FSMContext):
     await state.set_state(AdminFSM.add_emoji)
     await cb.message.answer(f"{pe('add', '➕')} Отправь эмодзи (можно премиум или ID):\n/cancel для отмены")
     await cb.answer()
+
 
 @router.message(AdminFSM.add_emoji)
 async def adm_add_emoji(message: Message, state: FSMContext):
@@ -533,6 +562,7 @@ async def adm_add_emoji(message: Message, state: FSMContext):
     await state.set_state(AdminFSM.add_trigger)
     await message.answer("Теперь отправь <b>триггер</b> (то, что будут писать):")
 
+
 @router.message(AdminFSM.add_trigger)
 async def adm_add_trigger(message: Message, state: FSMContext):
     if message.text and message.text.startswith("/cancel"):
@@ -544,6 +574,7 @@ async def adm_add_trigger(message: Message, state: FSMContext):
     await state.update_data(trigger=trigger)
     await state.set_state(AdminFSM.add_action)
     await message.answer("Теперь отправь <b>действие</b> (что будет в результате):")
+
 
 @router.message(AdminFSM.add_action)
 async def adm_add_action(message: Message, state: FSMContext):
@@ -559,6 +590,7 @@ async def adm_add_action(message: Message, state: FSMContext):
     kb.button(text="Обычная", callback_data="adm:addadult:0", icon_custom_emoji_id=PE["check"])
     kb.button(text="18+", callback_data="adm:addadult:1", icon_custom_emoji_id=PE["18plus"])
     await message.answer("Это 18+ команда?", reply_markup=kb.as_markup())
+
 
 @router.callback_query(F.data.startswith("adm:addadult:"))
 async def adm_add_finish(cb: CallbackQuery, state: FSMContext):
@@ -578,6 +610,7 @@ async def adm_add_finish(cb: CallbackQuery, state: FSMContext):
         except Exception as e:
             await cb.message.edit_text(f"{pe('cross', '❌')} Ошибка (возможно такой триггер уже есть):\n{e}")
     await cb.answer()
+
 
 @router.callback_query(F.data == "adm:customs")
 async def adm_customs(cb: CallbackQuery):
@@ -603,6 +636,7 @@ async def adm_customs(cb: CallbackQuery):
     kb.button(text="Назад", callback_data="adm:back", icon_custom_emoji_id=PE["back"])
     await cb.message.edit_text(text[:4000], reply_markup=kb.as_markup())
     await cb.answer()
+
 
 @router.callback_query(F.data == "adm:chats")
 async def adm_chats(cb: CallbackQuery):
@@ -633,6 +667,7 @@ async def adm_chats(cb: CallbackQuery):
     await cb.message.edit_text(text[:4000], reply_markup=kb.as_markup())
     await cb.answer()
 
+
 @router.callback_query(F.data.startswith("adm:chat:"))
 async def adm_chat_manage(cb: CallbackQuery):
     if not await is_admin(cb.from_user.id):
@@ -657,6 +692,7 @@ async def adm_chat_manage(cb: CallbackQuery):
     await cb.message.edit_text(text, reply_markup=kb.as_markup())
     await cb.answer()
 
+
 @router.callback_query(F.data.startswith("adm:chatarp:"))
 async def adm_chat_arp(cb: CallbackQuery):
     if not await is_admin(cb.from_user.id):
@@ -672,6 +708,7 @@ async def adm_chat_arp(cb: CallbackQuery):
     cb.data = f"adm:chat:{chat_id}"
     await adm_chat_manage(cb)
 
+
 @router.callback_query(F.data.startswith("adm:chatcrp:"))
 async def adm_chat_crp(cb: CallbackQuery):
     if not await is_admin(cb.from_user.id):
@@ -686,6 +723,7 @@ async def adm_chat_crp(cb: CallbackQuery):
     await cb.answer("Обновлено")
     cb.data = f"adm:chat:{chat_id}"
     await adm_chat_manage(cb)
+
 
 # ==================== RP IN GROUPS ====================
 @router.message(F.chat.type.in_({ChatType.GROUP, ChatType.SUPERGROUP}), F.reply_to_message)
@@ -722,6 +760,7 @@ async def rp_handler(message: Message):
                 user_m = mention(message.from_user)
                 target_m = mention(message.reply_to_message.from_user)
                 await message.reply(format_rp(custom["emoji"], user_m, custom["action"], target_m))
+
 
 # ==================== INLINE MODE ====================
 @router.inline_query()
@@ -777,11 +816,13 @@ async def inline_handler(query: InlineQuery):
                     [
                         InlineKeyboardButton(
                             text="Согласиться",
+                            style="success",
                             callback_data=f"inl:yes:{r['id']}:{query.from_user.id}",
                             icon_custom_emoji_id=PE["check"]
                         ),
                         InlineKeyboardButton(
                             text="Отказаться",
+                            style="danger",
                             callback_data=f"inl:no:{r['id']}:{query.from_user.id}",
                             icon_custom_emoji_id=PE["cross"]
                         )
@@ -790,6 +831,7 @@ async def inline_handler(query: InlineQuery):
             )
         )
     await query.answer(results, cache_time=5, is_personal=True)
+
 
 @router.callback_query(F.data.startswith("inl:"))
 async def inline_callback(cb: CallbackQuery):
@@ -838,11 +880,13 @@ async def inline_callback(cb: CallbackQuery):
         return
     await cb.answer()
 
+
 # ==================== TRACK GROUPS ====================
 @router.my_chat_member(ChatMemberUpdatedFilter(IS_NOT_MEMBER >> IS_MEMBER))
 async def bot_added(event: ChatMemberUpdated):
     await ensure_group(event.chat.id, event.chat.title)
     logger.info(f"Bot added to {event.chat.id} ({event.chat.title})")
+
 
 @router.my_chat_member(ChatMemberUpdatedFilter(IS_MEMBER >> IS_NOT_MEMBER))
 async def bot_removed(event: ChatMemberUpdated):
@@ -851,11 +895,13 @@ async def bot_removed(event: ChatMemberUpdated):
         await db.commit()
     logger.info(f"Bot removed from {event.chat.id}")
 
+
 # ==================== MAIN ====================
 async def main():
     await init_db()
     logger.info("Database initialized")
     await dp.start_polling(bot)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
