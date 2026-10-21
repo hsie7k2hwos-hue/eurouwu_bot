@@ -3,6 +3,7 @@ import logging
 import os
 import re
 from contextlib import suppress, asynccontextmanager
+from html import escape
 from typing import Optional
 import aiosqlite
 from aiogram import Bot, Dispatcher, F, Router
@@ -199,9 +200,22 @@ async def ensure_group(chat_id: int, title: str = None):
 
 
 # ==================== HELPERS ====================
+def safe_text(s) -> str:
+    """Экранирование HTML-символов для безопасной вставки в разметку."""
+    if s is None:
+        return ""
+    return escape(str(s))
+
+
 def mention(user) -> str:
-    name = getattr(user, "first_name", None) or "Аноним"
-    uid = getattr(user, "id", user)
+    """Ссылка на пользователя. Предпочитаем username (без превью), иначе tg://user?id=."""
+    name = safe_text(getattr(user, "first_name", None) or "Аноним")
+    username = getattr(user, "username", None)
+    if username:
+        return f'<a href="https://t.me/{username}">{name}</a>'
+    uid = getattr(user, "id", None)
+    if uid is None:
+        uid = user  # на случай, если передали просто id
     return f'<a href="tg://user?id={uid}">{name}</a>'
 
 
@@ -221,7 +235,7 @@ def pe(name: str, fallback: str = "✨") -> str:
 
 
 def format_rp(emoji: str, user_name: str, action: str, target_name: str) -> str:
-    return f"{render_emoji(emoji)} {user_name} {action} {target_name}"
+    return f"{render_emoji(emoji)} {user_name} {safe_text(action)} {target_name}"
 
 
 def extract_custom_emoji_id(message: Message) -> Optional[str]:
@@ -302,7 +316,7 @@ async def cmd_nrp(message: Message, command: CommandObject):
             )
             await db.commit()
             shown = render_emoji(emoji)
-            await message.answer(f"{pe('check', '✅')} Кастомная РП создана: {shown} <b>{trigger}</b>")
+            await message.answer(f"{pe('check', '✅')} Кастомная РП создана: {shown} <b>{safe_text(trigger)}</b>")
         except Exception:
             await message.answer(f"{pe('cross', '❌')} У тебя уже есть РП с таким триггером. Удали старую через /drp")
 
@@ -321,7 +335,7 @@ async def cmd_mrp(message: Message):
     text = f"{pe('list', '🗂')} <b>Твои кастомные РП:</b>\n\n"
     for r in rows:
         em = render_emoji(r["emoji"])
-        text += f"#{r['id']} {em} <code>{r['trigger']}</code> → {r['action']}\n"
+        text += f"#{r['id']} {em} <code>{safe_text(r['trigger'])}</code> → {safe_text(r['action'])}\n"
     await message.answer(text)
 
 
@@ -453,8 +467,8 @@ async def adm_rp_manage(cb: CallbackQuery):
     text = (
         f"{pe('info', 'ℹ')} <b>РП #{rp['id']}</b>\n\n"
         f"Эмодзи: {em}\n"
-        f"Триггер: <code>{rp['trigger']}</code>\n"
-        f"Действие: {rp['action']}\n"
+        f"Триггер: <code>{safe_text(rp['trigger'])}</code>\n"
+        f"Действие: {safe_text(rp['action'])}\n"
         f"18+: {'Да' if rp['is_18plus'] else 'Нет'}\n"
         f"Активна: {'Да' if rp['is_active'] else 'Нет'}"
     )
@@ -606,9 +620,9 @@ async def adm_add_finish(cb: CallbackQuery, state: FSMContext):
                 (data["emoji"], data["trigger"], data["action"], is_adult)
             )
             await db.commit()
-            await cb.message.edit_text(f"{pe('check', '✅')} Добавлено: <b>{data['trigger']}</b>")
+            await cb.message.edit_text(f"{pe('check', '✅')} Добавлено: <b>{safe_text(data['trigger'])}</b>")
         except Exception as e:
-            await cb.message.edit_text(f"{pe('cross', '❌')} Ошибка (возможно такой триггер уже есть):\n{e}")
+            await cb.message.edit_text(f"{pe('cross', '❌')} Ошибка (возможно такой триггер уже есть):\n{safe_text(str(e))}")
     await cb.answer()
 
 
@@ -631,7 +645,7 @@ async def adm_customs(cb: CallbackQuery):
         for r in rows:
             uname = f"@{r['username']}" if r["username"] else (r["first_name"] or str(r["user_id"]))
             em = render_emoji(r["emoji"])
-            text += f"#{r['id']} {em} <code>{r['trigger']}</code> → {r['action']} (от {uname})\n"
+            text += f"#{r['id']} {em} <code>{safe_text(r['trigger'])}</code> → {safe_text(r['action'])} (от {safe_text(uname)})\n"
     kb = InlineKeyboardBuilder()
     kb.button(text="Назад", callback_data="adm:back", icon_custom_emoji_id=PE["back"])
     await cb.message.edit_text(text[:4000], reply_markup=kb.as_markup())
@@ -679,7 +693,7 @@ async def adm_chat_manage(cb: CallbackQuery):
     if not g:
         return await cb.answer("Чат не найден", show_alert=True)
     text = (
-        f"{pe('chats', '💬')} <b>Чат:</b> {g['title'] or chat_id}\n"
+        f"{pe('chats', '💬')} <b>Чат:</b> {safe_text(g['title'] or chat_id)}\n"
         f"<code>{chat_id}</code>\n\n"
         f"18+ РП: {'✅ Вкл' if g['arp_enabled'] else '❌ Выкл'}\n"
         f"Кастомные РП: {'✅ Вкл' if g['crp_enabled'] else '❌ Выкл'}"
@@ -748,7 +762,7 @@ async def rp_handler(message: Message):
                 return
             user_m = mention(message.from_user)
             target_m = mention(message.reply_to_message.from_user)
-            await message.reply(format_rp(rp["emoji"], user_m, rp["action"], target_m))
+            await message.reply(format_rp(rp["emoji"], user_m, rp["action"], target_m), disable_web_page_preview=True)
             return
         if crp_ok:
             cur = await db.execute(
@@ -759,7 +773,7 @@ async def rp_handler(message: Message):
             if custom:
                 user_m = mention(message.from_user)
                 target_m = mention(message.reply_to_message.from_user)
-                await message.reply(format_rp(custom["emoji"], user_m, custom["action"], target_m))
+                await message.reply(format_rp(custom["emoji"], user_m, custom["action"], target_m), disable_web_page_preview=True)
 
 
 # ==================== INLINE MODE ====================
@@ -798,11 +812,13 @@ async def inline_handler(query: InlineQuery):
     if q:
         all_rps = [r for r in all_rps if q in r["trigger"]]
     for r in all_rps[:40]:
+        # В title/description инлайн-результатов кастомные эмодзи не отображаются нормально → заглушка
         em_show = r["emoji"] if not str(r["emoji"]).isdigit() else "✨"
         title = f"{em_show} {r['trigger']}"
         if r["adult"]:
             title += " 🔞"
-        msg_text = f"{render_emoji(r['emoji'])} {mention(query.from_user)} хочет {r['trigger']}"
+        # В самом сообщении сразу настоящий премиум-эмодзи через <tg-emoji>
+        msg_text = f"{render_emoji(r['emoji'])} {mention(query.from_user)} хочет {safe_text(r['trigger'])}"
         results.append(
             InlineQueryResultArticle(
                 id=r["id"],
@@ -810,7 +826,8 @@ async def inline_handler(query: InlineQuery):
                 description=f"хочет {r['trigger']}",
                 input_message_content=InputTextMessageContent(
                     message_text=msg_text,
-                    parse_mode=ParseMode.HTML
+                    parse_mode=ParseMode.HTML,
+                    disable_web_page_preview=True
                 ),
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                     [
@@ -857,23 +874,24 @@ async def inline_callback(cb: CallbackQuery):
         return await cb.answer("РП не найдена", show_alert=True)
     try:
         owner = await bot.get_chat(owner_id)
-        owner_mention = f'<a href="tg://user?id={owner_id}">{owner.first_name or "Кто-то"}</a>'
+        owner_mention = mention(owner)
     except Exception:
         owner_mention = "Кто-то"
     target_mention = mention(cb.from_user)
     if action == "yes":
         text = format_rp(rp["emoji"], owner_mention, rp["action"], target_mention)
     else:
-        text = f"{render_emoji(NO_EMOJI)} {target_mention} не хочет {rp['trigger']}"
+        text = f"{render_emoji(NO_EMOJI)} {target_mention} не хочет {safe_text(rp['trigger'])}"
     try:
         if cb.inline_message_id:
             await bot.edit_message_text(
                 text=text,
                 inline_message_id=cb.inline_message_id,
-                parse_mode=ParseMode.HTML
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True
             )
         elif cb.message:
-            await cb.message.edit_text(text)
+            await cb.message.edit_text(text, disable_web_page_preview=True)
     except Exception as e:
         logger.error(f"Inline edit error: {e}")
         await cb.answer("Не удалось обновить сообщение", show_alert=True)
