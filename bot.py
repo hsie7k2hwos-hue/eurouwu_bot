@@ -248,6 +248,26 @@ def extract_custom_emoji_id(message: Message) -> Optional[str]:
     return None
 
 
+def make_inline_keyboard(rid: str, owner_id: int) -> InlineKeyboardMarkup:
+    """Клавиатура для инлайн-результата (согласие / отказ)"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text="Согласиться",
+                style="success",
+                callback_data=f"inl:yes:{rid}:{owner_id}",
+                icon_custom_emoji_id=PE["check"]
+            ),
+            InlineKeyboardButton(
+                text="Отказаться",
+                style="danger",
+                callback_data=f"inl:no:{rid}:{owner_id}",
+                icon_custom_emoji_id=PE["cross"]
+            )
+        ]
+    ])
+
+
 # ==================== FSM ====================
 class AdminFSM(StatesGroup):
     add_emoji = State()
@@ -874,22 +894,7 @@ async def inline_handler(query: InlineQuery):
                     parse_mode=ParseMode.HTML,
                     disable_web_page_preview=True
                 ),
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [
-                        InlineKeyboardButton(
-                            text="Согласиться",
-                            style="success",
-                            callback_data=f"inl:yes:{r['id']}:{query.from_user.id}",
-                            icon_custom_emoji_id=PE["check"]
-                        ),
-                        InlineKeyboardButton(
-                            text="Отказаться",
-                            style="danger",
-                            callback_data=f"inl:no:{r['id']}:{query.from_user.id}",
-                            icon_custom_emoji_id=PE["cross"]
-                        )
-                    ]
-                ])
+                reply_markup=make_inline_keyboard(r["id"], query.from_user.id)
             )
         )
 
@@ -902,6 +907,7 @@ async def chosen_inline(result: ChosenInlineResult):
     - ставим настоящий премиум-эмодзи (если нужен)
     - оборачиваем в <b>
     - добавляем | между эмодзи и текстом
+    - сохраняем клавиатуру
     """
     if not result.inline_message_id:
         return
@@ -924,16 +930,19 @@ async def chosen_inline(result: ChosenInlineResult):
         return
 
     owner_mention = mention(result.from_user)
-    # Всегда редактируем на финальную версию с премиум-эмодзи (если это ID) + <b> + |
     text = f"<b>{render_emoji(rp['emoji'])} | {owner_mention} хочет {safe_text(rp['trigger'])}</b>"
+
+    # Важно: при edit_message_text без reply_markup клавиатура удаляется.
+    # Поэтому передаём её заново.
+    keyboard = make_inline_keyboard(rid, result.from_user.id)
 
     try:
         await bot.edit_message_text(
             text=text,
             inline_message_id=result.inline_message_id,
             parse_mode=ParseMode.HTML,
-            disable_web_page_preview=True
-            # reply_markup не передаём — кнопки остаются
+            disable_web_page_preview=True,
+            reply_markup=keyboard
         )
     except Exception as e:
         logger.error(f"Chosen inline edit error: {e}")
@@ -985,6 +994,7 @@ async def inline_callback(cb: CallbackQuery):
                 inline_message_id=cb.inline_message_id,
                 parse_mode=ParseMode.HTML,
                 disable_web_page_preview=True
+                # после согласия/отказа клавиатуру убираем — она больше не нужна
             )
         elif cb.message:
             await cb.message.edit_text(text, disable_web_page_preview=True)
