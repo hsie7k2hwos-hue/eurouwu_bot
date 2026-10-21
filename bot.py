@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import re
+import unicodedata
 from contextlib import suppress, asynccontextmanager
 from html import escape
 from typing import Optional
@@ -208,16 +209,71 @@ def safe_text(s) -> str:
     return escape(str(s))
 
 
+def is_effectively_empty(name: Optional[str]) -> bool:
+    """Проверяет, является ли имя визуально пустым.
+    Учитывает обычные пробелы, Hangul Filler (ㅤ), Braille blank (⠀),
+    zero-width символы и другие невидимые заполнители.
+    Возвращает True, если после очистки не осталось ни одной буквы/цифры/знака.
+    """
+    if not name:
+        return True
+
+    # Известные невидимые / заполнительные символы
+    fillers = (
+        "\u3164",  # Hangul Filler (ㅤ)
+        "\u2800",  # Braille Pattern Blank (⠀)
+        "\u200b",  # Zero Width Space
+        "\u200c",  # Zero Width Non-Joiner
+        "\u200d",  # Zero Width Joiner
+        "\u2060",  # Word Joiner
+        "\ufeff",  # BOM / Zero Width No-Break Space
+        "\u00a0",  # Non-breaking space
+        "\u202f",  # Narrow no-break space
+        "\u205f",  # Medium mathematical space
+        "\u3000",  # Ideographic space
+    )
+    cleaned = name
+    for f in fillers:
+        cleaned = cleaned.replace(f, "")
+    cleaned = cleaned.strip()
+
+    if not cleaned:
+        return True
+
+    # Осталось ли хоть что-то видимое: Letter / Number / Punctuation / Symbol
+    for c in cleaned:
+        if unicodedata.category(c)[0] in ("L", "N", "P", "S"):
+            return False
+    return True
+
+
 def mention(user) -> str:
-    """Ссылка на пользователя. Предпочитаем username (без превью), иначе tg://user?id=."""
-    name = safe_text(getattr(user, "first_name", None) or "Аноним")
+    """Ссылка на пользователя.
+    Приоритет отображаемого имени: first_name (если не пустое) → username → id → «Аноним».
+    Ссылка: username (без превью) → tg://user?id=...
+    """
+    first_name = getattr(user, "first_name", None)
     username = getattr(user, "username", None)
-    if username:
-        return f'<a href="https://t.me/{username}">{name}</a>'
     uid = getattr(user, "id", None)
     if uid is None:
         uid = user  # на случай, если передали просто id
-    return f'<a href="tg://user?id={uid}">{name}</a>'
+
+    # Выбор отображаемого имени
+    if first_name and not is_effectively_empty(first_name):
+        name = safe_text(first_name)
+    elif username:
+        name = safe_text(username)
+    elif uid is not None:
+        name = str(uid)
+    else:
+        name = "Аноним"
+
+    # Формирование ссылки
+    if username:
+        return f'<a href="https://t.me/{username}">{name}</a>'
+    if uid is not None:
+        return f'<a href="tg://user?id={uid}">{name}</a>'
+    return name
 
 
 def render_emoji(emoji: str) -> str:
