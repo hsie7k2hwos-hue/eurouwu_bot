@@ -236,7 +236,7 @@ def pe(name: str, fallback: str = "✨") -> str:
 
 
 def format_rp(emoji: str, user_name: str, action: str, target_name: str) -> str:
-    return f"{render_emoji(emoji)} {user_name} {safe_text(action)} {target_name}"
+    return f"<b>{render_emoji(emoji)} | {user_name} {safe_text(action)} {target_name}</b>"
 
 
 def extract_custom_emoji_id(message: Message) -> Optional[str]:
@@ -298,17 +298,21 @@ async def cmd_nrp(message: Message, command: CommandObject):
             f"Можно отправить премиум-эмодзи — бот сам его сохранит."
         )
         return
+
     custom_id = extract_custom_emoji_id(message)
     parts = [p.strip() for p in command.args.split("/")]
     if len(parts) != 3:
         await message.answer("Нужно ровно 3 части через / : эмодзи / триггер / действие")
         return
+
     emoji_raw, trigger, action = parts
     trigger = trigger.lower().strip()
     if not trigger or not action:
         await message.answer("Триггер и действие не могут быть пустыми")
         return
+
     emoji = custom_id if custom_id else emoji_raw.strip()
+
     async with get_db() as db:
         try:
             await db.execute(
@@ -330,9 +334,11 @@ async def cmd_mrp(message: Message):
             (message.from_user.id,)
         )
         rows = await cur.fetchall()
+
     if not rows:
         await message.answer(f"{pe('list', '🗂')} У тебя пока нет кастомных РП.")
         return
+
     text = f"{pe('list', '🗂')} <b>Твои кастомные РП:</b>\n\n"
     for r in rows:
         em = render_emoji(r["emoji"])
@@ -367,6 +373,7 @@ async def cmd_arp(message: Message):
     if member.status not in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR):
         await message.answer("Только администраторы чата")
         return
+
     await ensure_group(message.chat.id, message.chat.title)
     async with get_db() as db:
         cur = await db.execute("SELECT arp_enabled FROM groups WHERE chat_id = ?", (message.chat.id,))
@@ -374,6 +381,7 @@ async def cmd_arp(message: Message):
         new_val = 0 if row["arp_enabled"] else 1
         await db.execute("UPDATE groups SET arp_enabled = ? WHERE chat_id = ?", (new_val, message.chat.id))
         await db.commit()
+
     status = "включены" if new_val else "выключены"
     icon = pe("check", "✅") if new_val else pe("cross", "❌")
     await message.answer(f"{pe('18plus', '🔞')} 18+ РП-команды теперь {icon} <b>{status}</b> в этом чате.")
@@ -388,6 +396,7 @@ async def cmd_crp(message: Message):
     if member.status not in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR):
         await message.answer("Только администраторы чата")
         return
+
     await ensure_group(message.chat.id, message.chat.title)
     async with get_db() as db:
         cur = await db.execute("SELECT crp_enabled FROM groups WHERE chat_id = ?", (message.chat.id,))
@@ -395,6 +404,7 @@ async def cmd_crp(message: Message):
         new_val = 0 if row["crp_enabled"] else 1
         await db.execute("UPDATE groups SET crp_enabled = ? WHERE chat_id = ?", (new_val, message.chat.id))
         await db.commit()
+
     status = "включены" if new_val else "выключены"
     icon = pe("check", "✅") if new_val else pe("cross", "❌")
     await message.answer(f"{pe('custom', '🏷')} Кастомные РП теперь {icon} <b>{status}</b> в этом чате.")
@@ -439,6 +449,7 @@ async def adm_basic(cb: CallbackQuery):
             "SELECT id, emoji, trigger, is_18plus, is_active FROM rp_commands WHERE is_basic = 1 ORDER BY is_18plus, trigger"
         )
         rows = await cur.fetchall()
+
     text = f"{pe('list', '🗂')} <b>Базовые РП</b>\nНажми на команду, чтобы управлять ей:\n\n"
     kb = InlineKeyboardBuilder()
     for r in rows:
@@ -464,6 +475,7 @@ async def adm_rp_manage(cb: CallbackQuery):
         rp = await cur.fetchone()
     if not rp:
         return await cb.answer("Не найдено", show_alert=True)
+
     em = render_emoji(rp["emoji"])
     text = (
         f"{pe('info', 'ℹ')} <b>РП #{rp['id']}</b>\n\n"
@@ -533,24 +545,30 @@ async def adm_edit_value(message: Message, state: FSMContext):
     if message.text and message.text.startswith("/cancel"):
         await state.clear()
         return await message.answer("Отменено")
+
     data = await state.get_data()
     rid = data["edit_id"]
     field = data["edit_field"]
     value = message.text.strip() if message.text else ""
+
     if field == "emoji":
         custom_id = extract_custom_emoji_id(message)
         value = custom_id if custom_id else value
+
     if not value:
         return await message.answer("Пустое значение, попробуй ещё раз")
+
     allowed = {"emoji", "trigger", "action"}
     if field not in allowed:
         await state.clear()
         return await message.answer("Ошибка поля")
+
     async with get_db() as db:
         if field == "trigger":
             value = value.lower()
         await db.execute(f"UPDATE rp_commands SET {field} = ? WHERE id = ?", (value, rid))
         await db.commit()
+
     await state.clear()
     await message.answer(f"{pe('check', '✅')} Обновлено")
 
@@ -569,10 +587,12 @@ async def adm_add_emoji(message: Message, state: FSMContext):
     if message.text and message.text.startswith("/cancel"):
         await state.clear()
         return await message.answer("Отменено")
+
     custom_id = extract_custom_emoji_id(message)
     emoji = custom_id if custom_id else (message.text or "").strip()
     if not emoji:
         return await message.answer("Не понял эмодзи, попробуй ещё")
+
     await state.update_data(emoji=emoji)
     await state.set_state(AdminFSM.add_trigger)
     await message.answer("Теперь отправь <b>триггер</b> (то, что будут писать):")
@@ -583,9 +603,11 @@ async def adm_add_trigger(message: Message, state: FSMContext):
     if message.text and message.text.startswith("/cancel"):
         await state.clear()
         return await message.answer("Отменено")
+
     trigger = (message.text or "").strip().lower()
     if not trigger:
         return await message.answer("Пустой триггер")
+
     await state.update_data(trigger=trigger)
     await state.set_state(AdminFSM.add_action)
     await message.answer("Теперь отправь <b>действие</b> (что будет в результате):")
@@ -596,9 +618,11 @@ async def adm_add_action(message: Message, state: FSMContext):
     if message.text and message.text.startswith("/cancel"):
         await state.clear()
         return await message.answer("Отменено")
+
     action = (message.text or "").strip()
     if not action:
         return await message.answer("Пустое действие")
+
     await state.update_data(action=action)
     await state.set_state(AdminFSM.add_adult)
     kb = InlineKeyboardBuilder()
@@ -614,6 +638,7 @@ async def adm_add_finish(cb: CallbackQuery, state: FSMContext):
     is_adult = int(cb.data.split(":")[2])
     data = await state.get_data()
     await state.clear()
+
     async with get_db() as db:
         try:
             await db.execute(
@@ -623,7 +648,8 @@ async def adm_add_finish(cb: CallbackQuery, state: FSMContext):
             await db.commit()
             await cb.message.edit_text(f"{pe('check', '✅')} Добавлено: <b>{safe_text(data['trigger'])}</b>")
         except Exception as e:
-            await cb.message.edit_text(f"{pe('cross', '❌')} Ошибка (возможно такой триггер уже есть):\n{safe_text(str(e))}")
+            await cb.message.edit_text(
+                f"{pe('cross', '❌')} Ошибка (возможно такой триггер уже есть):\n{safe_text(str(e))}")
     await cb.answer()
 
 
@@ -639,6 +665,7 @@ async def adm_customs(cb: CallbackQuery):
             ORDER BY c.id DESC LIMIT 50
         """)
         rows = await cur.fetchall()
+
     if not rows:
         text = f"{pe('custom', '🏷')} Кастомных РП пока нет."
     else:
@@ -647,6 +674,7 @@ async def adm_customs(cb: CallbackQuery):
             uname = f"@{r['username']}" if r["username"] else (r["first_name"] or str(r["user_id"]))
             em = render_emoji(r["emoji"])
             text += f"#{r['id']} {em} <code>{safe_text(r['trigger'])}</code> → {safe_text(r['action'])} (от {safe_text(uname)})\n"
+
     kb = InlineKeyboardBuilder()
     kb.button(text="Назад", callback_data="adm:back", icon_custom_emoji_id=PE["back"])
     await cb.message.edit_text(text[:4000], reply_markup=kb.as_markup())
@@ -660,6 +688,7 @@ async def adm_chats(cb: CallbackQuery):
     async with get_db() as db:
         cur = await db.execute("SELECT chat_id, title, arp_enabled, crp_enabled FROM groups ORDER BY title")
         rows = await cur.fetchall()
+
     if not rows:
         text = f"{pe('chats', '💬')} Бот пока не добавлен ни в один чат (по БД)."
         kb = InlineKeyboardBuilder()
@@ -667,6 +696,7 @@ async def adm_chats(cb: CallbackQuery):
         await cb.message.edit_text(text, reply_markup=kb.as_markup())
         await cb.answer()
         return
+
     text = f"{pe('chats', '💬')} <b>Чаты бота</b>\nНажми на чат, чтобы управлять:\n\n"
     kb = InlineKeyboardBuilder()
     for r in rows:
@@ -693,6 +723,7 @@ async def adm_chat_manage(cb: CallbackQuery):
         g = await cur.fetchone()
     if not g:
         return await cb.answer("Чат не найден", show_alert=True)
+
     text = (
         f"{pe('chats', '💬')} <b>Чат:</b> {safe_text(g['title'] or chat_id)}\n"
         f"<code>{chat_id}</code>\n\n"
@@ -747,11 +778,14 @@ async def rp_handler(message: Message):
     if not text or text.startswith("/"):
         return
     text = re.sub(r"@\w+", "", text).strip()
+
     await ensure_user(message.from_user.id, message.from_user.username, message.from_user.first_name)
     await ensure_group(message.chat.id, message.chat.title)
+
     group = await get_group(message.chat.id)
     arp_ok = group["arp_enabled"] if group else True
     crp_ok = group["crp_enabled"] if group else True
+
     async with get_db() as db:
         cur = await db.execute(
             "SELECT emoji, action, is_18plus FROM rp_commands WHERE trigger = ? AND is_active = 1 AND is_basic = 1",
@@ -765,6 +799,7 @@ async def rp_handler(message: Message):
             target_m = mention(message.reply_to_message.from_user)
             await message.reply(format_rp(rp["emoji"], user_m, rp["action"], target_m), disable_web_page_preview=True)
             return
+
         if crp_ok:
             cur = await db.execute(
                 "SELECT emoji, action FROM custom_rp WHERE user_id = ? AND trigger = ?",
@@ -774,7 +809,8 @@ async def rp_handler(message: Message):
             if custom:
                 user_m = mention(message.from_user)
                 target_m = mention(message.reply_to_message.from_user)
-                await message.reply(format_rp(custom["emoji"], user_m, custom["action"], target_m), disable_web_page_preview=True)
+                await message.reply(format_rp(custom["emoji"], user_m, custom["action"], target_m),
+                                    disable_web_page_preview=True)
 
 
 # ==================== INLINE MODE ====================
@@ -783,6 +819,7 @@ async def inline_handler(query: InlineQuery):
     await ensure_user(query.from_user.id, query.from_user.username, query.from_user.first_name)
     q = (query.query or "").strip().lower()
     results = []
+
     async with get_db() as db:
         cur = await db.execute(
             "SELECT id, emoji, trigger, action, is_18plus FROM rp_commands WHERE is_active = 1 AND is_basic = 1"
@@ -793,6 +830,7 @@ async def inline_handler(query: InlineQuery):
             (query.from_user.id,)
         )
         customs = await cur.fetchall()
+
     all_rps = []
     for r in basics:
         all_rps.append({
@@ -810,16 +848,22 @@ async def inline_handler(query: InlineQuery):
             "action": r["action"],
             "adult": False
         })
+
     if q:
         all_rps = [r for r in all_rps if q in r["trigger"]]
+
     for r in all_rps[:40]:
         # В title/description инлайн-результатов кастомные эмодзи не отображаются нормально → заглушка
         em_show = r["emoji"] if not str(r["emoji"]).isdigit() else "✨"
         title = f"{em_show} {r['trigger']}"
         if r["adult"]:
             title += " 🔞"
-        # В самом сообщении сразу настоящий премиум-эмодзи через <tg-emoji>
-        msg_text = f"{render_emoji(r['emoji'])} {mention(query.from_user)} хочет {safe_text(r['trigger'])}"
+
+        # В начальном сообщении всегда ставим обычный эмодзи/заглушку,
+        # а сразу после отправки (chosen_inline_result) редактируем на настоящий премиум + <b> и |
+        em_placeholder = r["emoji"] if not str(r["emoji"]).isdigit() else "✨"
+        msg_text = f"<b>{em_placeholder} | {mention(query.from_user)} хочет {safe_text(r['trigger'])}</b>"
+
         results.append(
             InlineQueryResultArticle(
                 id=r["id"],
@@ -848,12 +892,17 @@ async def inline_handler(query: InlineQuery):
                 ])
             )
         )
+
     await query.answer(results, cache_time=5, is_personal=True)
 
 
 @router.chosen_inline_result()
 async def chosen_inline(result: ChosenInlineResult):
-    """Сразу после выбора inline-результата правим сообщение на версию с настоящим премиум-эмодзи."""
+    """Сразу после выбора inline-результата правим сообщение:
+    - ставим настоящий премиум-эмодзи (если нужен)
+    - оборачиваем в <b>
+    - добавляем | между эмодзи и текстом
+    """
     if not result.inline_message_id:
         return
 
@@ -875,7 +924,8 @@ async def chosen_inline(result: ChosenInlineResult):
         return
 
     owner_mention = mention(result.from_user)
-    text = f"{render_emoji(rp['emoji'])} {owner_mention} хочет {safe_text(rp['trigger'])}"
+    # Всегда редактируем на финальную версию с премиум-эмодзи (если это ID) + <b> + |
+    text = f"<b>{render_emoji(rp['emoji'])} | {owner_mention} хочет {safe_text(rp['trigger'])}</b>"
 
     try:
         await bot.edit_message_text(
@@ -895,8 +945,10 @@ async def inline_callback(cb: CallbackQuery):
     if len(parts) != 4:
         return await cb.answer()
     action, rid, owner_id = parts[1], parts[2], int(parts[3])
+
     if cb.from_user.id == owner_id:
         return await cb.answer("Это предложение для другого человека", show_alert=True)
+
     async with get_db() as db:
         if rid.startswith("b"):
             cur = await db.execute(
@@ -909,18 +961,23 @@ async def inline_callback(cb: CallbackQuery):
                 (int(rid[1:]),)
             )
         rp = await cur.fetchone()
+
     if not rp:
         return await cb.answer("РП не найдена", show_alert=True)
+
     try:
         owner = await bot.get_chat(owner_id)
         owner_mention = mention(owner)
     except Exception:
         owner_mention = "Кто-то"
+
     target_mention = mention(cb.from_user)
+
     if action == "yes":
         text = format_rp(rp["emoji"], owner_mention, rp["action"], target_mention)
     else:
-        text = f"{render_emoji(NO_EMOJI)} {target_mention} не хочет {safe_text(rp['trigger'])}"
+        text = f"<b>{render_emoji(NO_EMOJI)} | {target_mention} не хочет {safe_text(rp['trigger'])}</b>"
+
     try:
         if cb.inline_message_id:
             await bot.edit_message_text(
@@ -935,6 +992,7 @@ async def inline_callback(cb: CallbackQuery):
         logger.error(f"Inline edit error: {e}")
         await cb.answer("Не удалось обновить сообщение", show_alert=True)
         return
+
     await cb.answer()
 
 
